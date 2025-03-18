@@ -2,17 +2,22 @@ import itertools
 import numpy as np
 
 
+def sep_to_type(seps):
+    model = [1]
+    for sep in seps:
+        if sep:
+            model.append(1)
+        else:
+            model[-1] += 1
+    return model
+
+
 def candidate_models(p):
     """ Generate the whole family of Principal Subspace Analysis (PSA) models.
     """
     models = []
     for seps in list(itertools.product(*((False, True),)*(p-1))):
-        model = [1]
-        for sep in seps:
-                if sep:
-                    model.append(1)
-                else:
-                    model[-1] += 1
+        model = sep_to_type(seps)
         models.append(model)
     return models
 
@@ -21,10 +26,9 @@ def kappa(model):
     """ Compute the number of free parameters of a PSA model.
     """
     p = np.sum(model)
-    kappa_mu = p
     kappa_eigvals = len(model)
     kappa_eigenspaces = int(p * (p - 1) / 2 - np.sum(np.array(model) * (np.array(model) - 1) / 2))
-    return kappa_mu + kappa_eigvals + kappa_eigenspaces
+    return kappa_eigvals + kappa_eigenspaces
 
 
 def ll(model, eigval, n):
