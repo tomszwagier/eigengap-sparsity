@@ -55,7 +55,7 @@ def model_selection(X, models):
     p, n = X.shape
     S = (1 / n) * X @ X.T
     eigval, eigvec = np.linalg.eigh(S)
-    eigval, eigvec = eigval[::-1], eigvec[::-1]
+    eigval, eigvec = eigval[::-1], eigvec[:, ::-1]
     model_best, eigval_best, crit_best = None, None, np.inf
     for model in models:
         crit_model, eigval_mle = bic(model, eigval, n)

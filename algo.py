@@ -41,7 +41,7 @@ def project_cone(lbda):
 def pcd(loss_func, X, lr=0.01, max_iter=1000, tol=1e-6):
     steps = []
     count = 0
-    V, lbda = ortho_group.rvs(dim=X.shape[0]), np.random.normal(loc=1, scale=1.0, size=X.shape[0])  # TODO: CAUTION init?
+    V, lbda = ortho_group.rvs(dim=X.shape[0]), np.random.normal(loc=1, scale=1.0, size=X.shape[0])  # TODO: CAUTION init? We can probably do better... Also issue of ordering.
     prev_loss = np.inf
     while count < max_iter:
         V = V - lr * grad(lambda V_: loss_func(lbda, V_, X))(V)
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     start = time()
     S = (1 / n) * X @ X.T
     eigval, eigvec = np.linalg.eigh(S)
-    eigval, eigvec = eigval[::-1], eigvec[::-1]
+    eigval, eigvec = eigval[::-1], eigvec[:, ::-1]
     print("Time sample cov. =", time() - start)
     print("Pen. lik. sample cov. =", penalized_normal_loglikelihood(eigval, eigvec, X))
     print("Pen. lik. l0 sample cov. =", penalized_normal_loglikelihood_l0(eigval, eigvec, X))
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     start = time()
     shrunk_cov, shrinkage = ledoit_wolf(X.T, assume_centered=True)
     eigval_LW, eigvec_LW = np.linalg.eigh(shrunk_cov)
-    eigval_LW, eigvec_LW = eigval_LW[::-1], eigvec_LW[::-1]
+    eigval_LW, eigvec_LW = eigval_LW[::-1], eigvec_LW[:, ::-1]
     print("Time LW =", time() - start)
     print("Pen. lik. LW =", penalized_normal_loglikelihood(eigval_LW, eigvec_LW, X))
     print("Pen. lik. l0 LW =", penalized_normal_loglikelihood_l0(eigval_LW, eigvec_LW, X))
