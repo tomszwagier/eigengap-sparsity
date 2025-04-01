@@ -21,18 +21,24 @@ def project_cone(eigval):
     return np.clip(res.x, 1e-10, 1e10)
 
 
-def pgd(X, alpha=0, lr=0.01, max_iter=1000, tol=1e-6):
+def pgd(X, alpha=0, tau=0.8, c=0.1, stepsize_init=0.01, max_iter=1000, tol=1e-6):
     p, n = X.shape
     steps = []
     count = 0
     S = (1 / n) * X @ X.T
     eigval_scm, _ = np.linalg.eigh(S)
     eigval_scm = eigval_scm[::-1]
-    eigval = np.copy(eigval_scm)
+    eigval = eigval_scm
     prev_loss = np.inf
+    f = lambda eigval_: penalized_normal_loglikelihood_l1_rel(eigval_, eigval_scm, alpha, n)
     while count < max_iter:
-        eigval = eigval - lr * (grad(lambda eigval_: penalized_normal_loglikelihood_l1_rel(eigval_, eigval_scm, alpha, n))(eigval))
-        eigval = project_cone(eigval)
+        stepsize = stepsize_init
+        g = grad(f)(eigval)
+        eigval_new = project_cone(eigval - stepsize * g)
+        while f(eigval_new) > f(eigval) + c * np.dot(g, eigval_new - eigval):
+            stepsize = stepsize * tau
+            eigval_new = project_cone(eigval - stepsize * g)
+        eigval = eigval_new
         new_loss = penalized_normal_loglikelihood_l1_rel(eigval, eigval_scm, alpha, n)
         steps.append(new_loss)
         if (count > 0) and (abs((prev_loss - new_loss) / prev_loss) < tol):
@@ -51,124 +57,126 @@ def frob_loss(cov_true, cov_est):
 if __name__ == "__main__":
     np.random.seed(42)
 
-    n, p = 200, 100  # 40, 20 / 200, 100
-    cov_true = np.eye(p)
-    X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
-    # n, p = 800, 200
-    # cov_true = np.diag([10] * int(.4 * p) + [3] * int(.4 * p) + [1] * int(.2 * p))
-    # X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
-    alpha = np.log(n)  # BIC
+    n_exp = 10
+    results = np.zeros((n_exp, 4, 3))
+    for r in range(n_exp):
 
-    # Sample covariance
-    print("SAMPLE COVARIANCE")
-    start = time()
-    S = (1 / n) * X @ X.T
-    eigval_scm, eigvec_scm = np.linalg.eigh(S)
-    eigval_scm, eigvec_scm = eigval_scm[::-1], eigvec_scm[:, ::-1]
-    print("Time = ", time() - start)
-    print("Objective L0 = ", penalized_normal_loglikelihood_l0(eigval_scm, eigval_scm, alpha, n))
-    print("Objective L1-REL = ", penalized_normal_loglikelihood_l1_rel(eigval_scm, eigval_scm, alpha, n))
-    print("Frob. loss = ", frob_loss(cov_true, S))
-    print("Num params = ", kappa(sep_to_type(np.diff(eigval_scm))))
-    # print("Eigenvalues = ", eigval_scm)
+        # Dataset
+        # n, p = 200, 100  # 40, 20 / 200, 100
+        # cov_true = np.eye(p)
+        # X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
+        n, p = 400, 200
+        cov_true = np.diag([10] * int(.4 * p) + [1] * int(.4 * p) + [.1] * int(.2 * p))
+        X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
+        alpha = np.log(n)  # BIC
 
-    # Ledoit-Wolf
-    print("LEDOIT-WOLF")
-    start = time()
-    shrunk_cov, shrinkage = ledoit_wolf(X.T, assume_centered=True)
-    eigval_lw, _ = np.linalg.eigh(shrunk_cov)
-    eigval_lw = eigval_lw[::-1]
-    print("Time = ", time() - start)
-    print("Objective L0 = ", penalized_normal_loglikelihood_l0(eigval_lw, eigval_scm, alpha, n))
-    print("Objective L1-REL = ", penalized_normal_loglikelihood_l1_rel(eigval_lw, eigval_scm, alpha, n))
-    print("Frob. loss = ", frob_loss(cov_true, shrunk_cov))
-    print("Num params = ", kappa(sep_to_type(np.diff(eigval_lw))))
-    # print("Eigenvalues = ", eigval_lw)
+        # Sample covariance
+        print("SAMPLE COVARIANCE")
+        S = (1 / n) * X @ X.T
+        eigval_scm, eigvec_scm = np.linalg.eigh(S)
+        eigval_scm, eigvec_scm = eigval_scm[::-1], eigvec_scm[:, ::-1]
+        print("Pen. Lik. = ", penalized_normal_loglikelihood_l0(eigval_scm, eigval_scm, alpha, n))
+        print("Frob. loss = ", frob_loss(cov_true, S))
+        print("Num params = ", kappa(sep_to_type(np.diff(eigval_scm))))
+        results[r, 0] = np.array([penalized_normal_loglikelihood_l0(eigval_scm, eigval_scm, alpha, n), frob_loss(cov_true, S), kappa(sep_to_type(np.diff(eigval_scm)))])
 
-    # # Principal subspace analysis
-    # print("PRINCIPAL SUBSPACE ANALYSIS")
-    # start = time()
-    # models = candidate_models(p)
-    # model_best, eigval_psa, eigvec_psa = model_selection(X, models)
-    # print("Time = ", time() - start)
-    # print("Objective L0 = ", penalized_normal_loglikelihood_l0(eigval_psa, eigval_scm, alpha, n))
-    # print("Objective L1-REL = ", penalized_normal_loglikelihood_l1_rel(eigval_psa, eigval_scm, alpha, n))
-    # print("Frob. loss = ", frob_loss(cov_true, eigvec_psa @ np.diag(eigval_psa) @ eigvec_psa.T))
-    # print("Num params = ", kappa(sep_to_type(np.diff(eigval_psa))))
-    # # print("Eigenvalues = ", eigval_psa)
+        # Ledoit-Wolf
+        print("LEDOIT-WOLF")
+        shrunk_cov, shrinkage = ledoit_wolf(X.T, assume_centered=True)
+        eigval_lw, _ = np.linalg.eigh(shrunk_cov)
+        eigval_lw = eigval_lw[::-1]
+        print("Pen. Lik. = ", penalized_normal_loglikelihood_l0(eigval_lw, eigval_scm, alpha, n))
+        print("Frob. loss = ", frob_loss(cov_true, shrunk_cov))
+        print("Num params = ", kappa(sep_to_type(np.diff(eigval_lw))))
+        results[r, 1] = np.array([penalized_normal_loglikelihood_l0(eigval_lw, eigval_scm, alpha, n), frob_loss(cov_true, shrunk_cov), kappa(sep_to_type(np.diff(eigval_lw)))])
 
-    # Eigengap sparsity
-    print("EIGENGAP SPARSITY")
-    start = time()
-    eigval_escp, steps = pgd(X, alpha, lr=0.1, max_iter=1000, tol=1e-6)
-    print("Time = ", time() - start)
-    print("Objective L0 = ", penalized_normal_loglikelihood_l0(eigval_escp, eigval_scm, alpha, n))
-    print("Objective L1 REL = ", penalized_normal_loglikelihood_l1_rel(eigval_escp, eigval_scm, alpha, n))
-    print("Frob. loss = ", frob_loss(cov_true, eigvec_scm @ np.diag(eigval_escp) @ eigvec_scm.T))
-    print("Num params = ", kappa(sep_to_type(np.diff(eigval_escp))))
-    # print("Eigenvalues = ", eigval_escp)
-    plt.figure()
-    plt.plot(steps)
-    plt.show()
+        # Principal subspace analysis
+        if p <= 20:
+            print("PRINCIPAL SUBSPACE ANALYSIS")
+            models = candidate_models(p)
+            model_best, eigval_psa, eigvec_psa = model_selection(X, models)
+            print("Pen. Lik. = ", penalized_normal_loglikelihood_l0(eigval_psa, eigval_scm, alpha, n))
+            print("Frob. loss = ", frob_loss(cov_true, eigvec_psa @ np.diag(eigval_psa) @ eigvec_psa.T))
+            print("Num params = ", kappa(sep_to_type(np.diff(eigval_psa))))
+            results[r, 2] = np.array([penalized_normal_loglikelihood_l0(eigval_psa, eigval_scm, alpha, n), frob_loss(cov_true, eigvec_psa @ np.diag(eigval_psa) @ eigvec_psa.T), kappa(sep_to_type(np.diff(eigval_psa)))])
 
-    plt.figure()
-    plt.plot(np.diag(cov_true), ls="solid", color='k', label="True")
-    plt.plot(eigval_scm, ls=(0, (5, 1)), color='tab:red', label="SCM")
-    plt.plot(eigval_lw, ls=(0, (5, 5)), color='tab:orange', label="LW")
-    # plt.plot(eigval_psa, ls=(0, (5, 10)), color='tab:blue', label="PSA")
-    plt.plot(eigval_escp, ls=(5, (10, 3)), color='tab:green', label="ESCP")
-    plt.legend()
-    plt.show()
+        # Eigengap sparsity
+        print("EIGENGAP SPARSITY")
+        stepsize_init = (eigval_scm[0] - eigval_scm[-1]) / (eigval_scm[0] * alpha)
+        eigval_escp, steps = pgd(X, alpha, tau=0.8, c=0.1, stepsize_init=stepsize_init, max_iter=50000, tol=1e-10)  # 100000 / 1e-10/20 for last example
+        print("Pen. Lik. = ", penalized_normal_loglikelihood_l0(eigval_escp, eigval_scm, alpha, n))
+        print("Frob. loss = ", frob_loss(cov_true, eigvec_scm @ np.diag(eigval_escp) @ eigvec_scm.T))
+        print("Num params = ", kappa(sep_to_type(np.diff(eigval_escp))))
+        results[r, 3] = np.array([penalized_normal_loglikelihood_l0(eigval_escp, eigval_scm, alpha, n), frob_loss(cov_true, eigvec_scm @ np.diag(eigval_escp) @ eigvec_scm.T), kappa(sep_to_type(np.diff(eigval_escp)))])
+        # plt.figure()
+        # plt.plot(steps)
+        # plt.show()
+
+        # plt.figure()
+        # plt.plot(np.diag(cov_true), ls="solid", color='k', label="True")
+        # plt.plot(eigval_scm, ls=(0, (5, 1)), color='tab:red', label="SCM")
+        # plt.plot(eigval_lw, ls=(0, (5, 5)), color='tab:orange', label="LW")
+        # if p <= 20:
+        #     plt.plot(eigval_psa, ls=(0, (5, 10)), color='tab:blue', label="PSA")
+        # plt.plot(eigval_escp, ls=(5, (10, 3)), color='tab:green', label="ESCP")
+        # plt.legend()
+        # plt.show()
+
+    print(np.mean(results, axis=0))
+    print(np.std(results, axis=0))
 
 
-    ### TIME CURVES
-    n = 2000
-    times_ = np.zeros((10, 20, 4))
-    for r in range(10):
-        print(r)
-        times = []
-        for p in np.logspace(1, 3, 20).astype('int'):
-            cov_true = np.eye(p)
-            X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
-            alpha = np.log(n)
-            times_p = []
-
-            # Sample covariance
-            start = time()
-            S = (1 / n) * X @ X.T
-            eigval_scm, eigvec_scm = np.linalg.eigh(S)
-            eigval_scm, eigvec_scm = eigval_scm[::-1], eigvec_scm[:, ::-1]
-            times_p.append(time() - start)
-
-            # Ledoit-Wolf
-            start = time()
-            shrunk_cov, shrinkage = ledoit_wolf(X.T, assume_centered=True)
-            eigval_lw, _ = np.linalg.eigh(shrunk_cov)
-            eigval_lw = eigval_lw[::-1]
-            times_p.append(time() - start)
-
-            # Principal subspace analysis
-            if p < 20:
-                start = time()
-                models = candidate_models(p)
-                model_best, eigval_psa, eigvec_psa = model_selection(X, models)
-                times_p.append(time() - start)
-            else:  # will be too long, so let's say the time after p=20 is above 50s for this plot (which is what we observe in practice)
-                times_p.append(50)
-
-            # Eigengap sparsity
-            start = time()
-            eigval_escp, steps = pgd(X, alpha, lr=0.1, max_iter=1000, tol=1e-6)
-            times_p.append(time() - start)
-
-            times.append(times_p)
-
-        times_[r] = np.array(times)
-    plt.figure()
-    plt.plot(np.logspace(1, 3, 20).astype('int'), np.mean(times_[:, :, 0], axis=0), ls=(0, (5, 1)), color='tab:red', label="SCM")
-    plt.plot(np.logspace(1, 3, 20).astype('int'), np.mean(times_[:, :, 1], axis=0), ls=(0, (5, 5)), color='tab:orange', label="LW")
-    plt.plot(np.logspace(1, 3, 20).astype('int'), np.mean(times_[:, :, 2], axis=0), ls=(0, (5, 10)), color='tab:blue', label="PSA")
-    plt.plot(np.logspace(1, 3, 20).astype('int'), np.mean(times_[:, :, 3], axis=0), ls=(5, (10, 3)), color='tab:green', label="ESCP")
-    plt.xscale('log')
-    plt.legend()
-    plt.show()
+    # ### TIME CURVES
+    # n = 2000
+    # n_exp = 10
+    # n_p = 20
+    # times_ = np.zeros((n_exp, n_p, 4))
+    # for r in range(n_exp):
+    #     print(r)
+    #     times = []
+    #     for p in np.logspace(1, 3, n_p).astype('int'):
+    #         cov_true = np.eye(p)
+    #         X = np.random.multivariate_normal(mean=np.zeros(p,), cov=cov_true, size=n).T
+    #         alpha = np.log(n)
+    #         times_p = []
+    #
+    #         # Sample covariance
+    #         start = time()
+    #         S = (1 / n) * X @ X.T
+    #         eigval_scm, eigvec_scm = np.linalg.eigh(S)
+    #         eigval_scm, eigvec_scm = eigval_scm[::-1], eigvec_scm[:, ::-1]
+    #         times_p.append(time() - start)
+    #
+    #         # Ledoit-Wolf
+    #         start = time()
+    #         shrunk_cov, shrinkage = ledoit_wolf(X.T, assume_centered=True)
+    #         eigval_lw, _ = np.linalg.eigh(shrunk_cov)
+    #         eigval_lw = eigval_lw[::-1]
+    #         times_p.append(time() - start)
+    #
+    #         # Principal subspace analysis
+    #         if p < 20:
+    #             start = time()
+    #             models = candidate_models(p)
+    #             model_best, eigval_psa, eigvec_psa = model_selection(X, models)
+    #             times_p.append(time() - start)
+    #         else:  # will be too long, so let's say the time after p=20 is above 50s for this plot (which is what we observe in practice)
+    #             times_p.append(50)
+    #
+    #         # Eigengap sparsity
+    #         start = time()
+    #         stepsize_init = (eigval_scm[0] - eigval_scm[-1]) / (eigval_scm[0] * alpha)
+    #         eigval_escp, steps = pgd(X, alpha, tau=0.8, c=0.1, stepsize_init=stepsize_init, max_iter=1000, tol=1e-6)
+    #         times_p.append(time() - start)
+    #
+    #         times.append(times_p)
+    #
+    #     times_[r] = np.array(times)
+    # plt.figure()
+    # plt.plot(np.logspace(1, 3, n_p).astype('int'), np.mean(times_[:, :, 0], axis=0), ls=(0, (5, 1)), color='tab:red', label="SCM")
+    # plt.plot(np.logspace(1, 3, n_p).astype('int'), np.mean(times_[:, :, 1], axis=0), ls=(0, (5, 5)), color='tab:orange', label="LW")
+    # plt.plot(np.logspace(1, 3, n_p).astype('int'), np.mean(times_[:, :, 2], axis=0), ls=(0, (5, 10)), color='tab:blue', label="PSA")
+    # plt.plot(np.logspace(1, 3, n_p).astype('int'), np.mean(times_[:, :, 3], axis=0), ls=(5, (10, 3)), color='tab:green', label="ESCP")
+    # plt.xscale('log')
+    # plt.legend()
+    # plt.show()
